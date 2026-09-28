@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+from pathlib import Path
 import time
 import pandas as pd
 from services.auth.login_page import render_login_page
@@ -24,8 +25,9 @@ def main():
         layout="centered"
     )
 
-    load_css(os.path.join(os.getcwd(), "static", "style.css"))
-    inject_local_font(os.path.join(os.getcwd(), "static", "AdobeClean.otf"), "AdobeClean")
+    _root = Path(__file__).resolve().parent
+    load_css(str(_root / "static" / "style.css"))
+    inject_local_font(str(_root / "static" / "AdobeClean.otf"), "AdobeClean")
 
     init_db()
 
@@ -201,9 +203,16 @@ def main():
             key="exercise-analysis",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessorClass,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            rtc_configuration={
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {"urls": ["stun:stun.cloudflare.com:3478"]},
+                ]
+            },
             media_stream_constraints={
-                "video": True,
+                "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
                 "audio": False
             },
             async_processing=True
