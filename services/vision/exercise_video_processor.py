@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import cv2
 import av
 import numpy as np
@@ -21,7 +22,9 @@ class VideoProcessorClass(VideoProcessorBase):
         self._latest_metrics = None
         self._exercise_type = "Squats"
 
-        model_path = os.path.join(os.getcwd(), "ml_model", "pose_landmarker_full.task")
+        # Resolve path relative to this file so it works on Streamlit Cloud
+        _project_root = Path(__file__).resolve().parents[2]
+        model_path = str(_project_root / "ml_model" / "pose_landmarker_full.task")
         base_option = python.BaseOptions(model_asset_path=model_path)
 
         options = vision.PoseLandmarkerOptions( 
