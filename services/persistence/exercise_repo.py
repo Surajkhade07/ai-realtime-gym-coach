@@ -1,4 +1,6 @@
 import sqlite3
+import hashlib
+import secrets
 import streamlit as st
 from pathlib import Path
 
@@ -26,9 +28,18 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
+                password_hash TEXT,
+                salt TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Auto-migrate table if password_hash or salt is missing
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "password_hash" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        if "salt" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN salt TEXT")
 
         # Exercise logs table
         conn.execute("""
@@ -42,6 +53,71 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+
+def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
+    if not salt:
+        salt = secrets.token_hex(16)
+    pwd_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return pwd_hash, salt
+
+
+def _verify_password_hash(password: str, stored_hash: str, salt: str) -> bool:
+    if not stored_hash or not salt:
+        return False
+    computed_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return secrets.compare_digest(computed_hash, stored_hash)
+
+
+def register_user(username: str, password: str):
+    username = username.strip()
+    if not username or not password:
+        return None
+
+    pwd_hash, salt = _hash_password(password)
+    conn = _get_connection()
+
+    try:
+        with conn:
+            cursor = conn.execute("""
+                INSERT INTO users(username, password_hash, salt)
+                VALUES(?, ?, ?)
+            """, (username, pwd_hash, salt))
+            user_id = cursor.lastrowid
+            return {"id": user_id, "username": username}
+    except sqlite3.IntegrityError:
+        return None
+
+
+def verify_user(username: str, password: str):
+    username = username.strip()
+    if not username or not password:
+        return None
+
+    user = get_user(username)
+    if not user:
+        return None
+
+    cols = user.keys() if hasattr(user, "keys") else []
+    stored_hash = user["password_hash"] if "password_hash" in cols else None
+    salt = user["salt"] if "salt" in cols else None
+
+    if stored_hash and salt:
+        if _verify_password_hash(password, stored_hash, salt):
+            return {"id": user["id"], "username": user["username"]}
+        return None
+
+    # Legacy fallback: if user had no password yet, set it now
+    if stored_hash is None:
+        pwd_hash, new_salt = _hash_password(password)
+        conn = _get_connection()
+        with conn:
+            conn.execute("""
+                UPDATE users SET password_hash = ?, salt = ? WHERE id = ?
+            """, (pwd_hash, new_salt, user["id"]))
+        return {"id": user["id"], "username": user["username"]}
+
+    return None
 
 
 def get_user(username):
