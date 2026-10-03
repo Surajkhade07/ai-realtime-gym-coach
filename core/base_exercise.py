@@ -21,6 +21,9 @@ class BaseExercise(ABC):
         cos_angle=max(-1.0,min(1.0,dot/(mag_a*mag_c))) # handling cos value (-1,1)
 
         return math.degrees(math.acos(cos_angle))
+    
+    # Method alias for compatibility
+    calculate_angle = calculate_angles
 
     def get_point(self,landmarks,idx):
         p=landmarks[idx]

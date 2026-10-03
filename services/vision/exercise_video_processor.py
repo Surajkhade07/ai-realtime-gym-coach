@@ -19,7 +19,7 @@ from services.config.workout_config import POSE_CONNECTIONS
 class VideoProcessorClass(VideoProcessorBase):
     def __init__(self):
         self._lock = threading.Lock()
-        self._latest_metrics = None
+        self._latest_metrics = {"pose_detected": False, "reps": 0}
         self._exercise_type = "Squats"
 
         # Resolve path relative to this file so it works on Streamlit Cloud
@@ -30,9 +30,9 @@ class VideoProcessorClass(VideoProcessorBase):
         options = vision.PoseLandmarkerOptions( 
             base_options=base_option,
             running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.7,
-            min_pose_presence_confidence=0.7,
-            min_tracking_confidence=0.7,
+            min_pose_detection_confidence=0.5,
+            min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
             output_segmentation_masks=False
         )
 
@@ -68,24 +68,27 @@ class VideoProcessorClass(VideoProcessorBase):
         h, w = img.shape[:2]
 
         for start_idx, end_idx in POSE_CONNECTIONS:
-            p1 = landmarks[start_idx]
-            p2 = landmarks[end_idx]
-
-            if p1.visibility > 0.7 and p2.visibility > 0.7:
-                cv2.line(
-                    img,
-                    (int(p1.x * w), int(p1.y * h)),
-                    (int(p2.x * w), int(p2.y * h)),
-                    (0, 255, 0),
-                    8
-                )
+            if start_idx < len(landmarks) and end_idx < len(landmarks):
+                p1 = landmarks[start_idx]
+                p2 = landmarks[end_idx]
+                v1 = getattr(p1, 'visibility', 1.0)
+                v2 = getattr(p2, 'visibility', 1.0)
+                if (v1 is None or v1 >= 0.5) and (v2 is None or v2 >= 0.5):
+                    cv2.line(
+                        img,
+                        (int(p1.x * w), int(p1.y * h)),
+                        (int(p2.x * w), int(p2.y * h)),
+                        (0, 255, 0),
+                        3
+                    )
         
         for lm in landmarks:
-            if lm.visibility > 0.7:
+            v = getattr(lm, 'visibility', 1.0)
+            if v is None or v >= 0.5:
                 cv2.circle(
                     img, 
                     (int(lm.x * w), int(lm.y * h)),
-                    8,
+                    5,
                     (255, 0, 0),
                     -1
                 )
@@ -94,9 +97,9 @@ class VideoProcessorClass(VideoProcessorBase):
         cv2.putText(
             img,
             "NO POSE DETECTED",
-            (30, 50),
+            (30, 45),
             cv2.FONT_HERSHEY_SIMPLEX,
-            1,
+            0.9,
             (0, 255, 0),
             2,
             cv2.LINE_AA,
@@ -104,10 +107,10 @@ class VideoProcessorClass(VideoProcessorBase):
 
         cv2.putText(
             img,
-            "PLEASE FACE THE CAMERA",
-            (30, 100),
+            "STEP BACK & FACE CAMERA",
+            (30, 85),
             cv2.FONT_HERSHEY_SIMPLEX,
-            1,
+            0.8,
             (0, 255, 0),
             2,
             cv2.LINE_AA,
@@ -215,13 +218,15 @@ class VideoProcessorClass(VideoProcessorBase):
             detector = self._detectors.get(ex_type)
 
             if detector:
-                metrics = detector.process(landmarks)
+                try:
+                    metrics = detector.process(landmarks)
+                except Exception:
+                    metrics = None
 
-                metrics["pose_detected"] = True
-
-                self._draw_overlays(image, metrics, ex_type)
-
-                self.set_latest_metrics(metrics)
+                if metrics is not None:
+                    metrics["pose_detected"] = True
+                    self._draw_overlays(image, metrics, ex_type)
+                    self.set_latest_metrics(metrics)
         else:
             self._draw_no_pose_warnings(image)
             
@@ -229,7 +234,7 @@ class VideoProcessorClass(VideoProcessorBase):
                 if self._latest_metrics is not None:
                     self._latest_metrics["pose_detected"] = False
                 else:
-                    self._latest_metrics = {"pose_detected": False}
+                    self._latest_metrics = {"pose_detected": False, "reps": 0}
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
     

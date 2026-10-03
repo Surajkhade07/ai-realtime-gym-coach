@@ -122,11 +122,11 @@ def main():
             st.divider()
 
             exercise = st.session_state.get("exercise_type")
-            total_reps = st.session_state.get("reps")
-            current_set_reps = st.session_state.get("current_set_reps")
-            reps_per_set = st.session_state.get("reps_per_set")
-            sets_completed = st.session_state.get("sets_completed")
-            target_sets = st.session_state.get("target_sets")
+            total_reps = st.session_state.get("reps", 0) or 0
+            current_set_reps = st.session_state.get("current_set_reps", 0) or 0
+            reps_per_set = st.session_state.get("reps_per_set", 0) or 0
+            sets_completed = st.session_state.get("sets_completed", 0) or 0
+            target_sets = st.session_state.get("target_sets", 0) or 0
 
             st.subheader("Progress")
 
@@ -226,7 +226,10 @@ def main():
             async_processing=True
         )
 
-        sync_metrics_update(context)
+        try:
+            sync_metrics_update(context)
+        except Exception:
+            pass
 
         if context.state.playing:
             time.sleep(0.25)
