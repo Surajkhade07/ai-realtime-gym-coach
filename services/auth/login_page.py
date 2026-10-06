@@ -132,14 +132,5 @@ def render_login_page() -> bool:
                     st.success(f"🎉 Account created! Welcome, **{user['username']}**!")
                     _set_logged_in(user)
 
-    # ── Password strength hint shown below both tabs ──────────────────────────
-    st.markdown(
-        """
-        <div style="text-align:center; color:#666; font-size:0.78rem; margin-top:1.5rem;">
-            🔒 Passwords are stored as salted SHA-256 hashes — never in plain text.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     return False  # not logged in yet
