@@ -207,23 +207,18 @@ def main():
                 "iceServers": [
                     {"urls": ["stun:stun.l.google.com:19302"]},
                     {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {
-                        "urls": [
-                            "turn:openrelay.metered.ca:80",
-                            "turn:openrelay.metered.ca:443",
-                            "turn:openrelay.metered.ca:443?transport=tcp",
-                            "turns:openrelay.metered.ca:443?transport=tcp",
-                        ],
-                        "username": "openrelayproject",
-                        "credential": "openrelayproject",
-                    },
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {"urls": ["stun:stun3.l.google.com:19302"]},
+                    {"urls": ["stun:stun4.l.google.com:19302"]},
+                    {"urls": ["stun:stun.stunprotocol.org:3478"]},
+                    {"urls": ["stun:stun.voip.blackberry.com:3478"]},
                 ]
             },
             media_stream_constraints={
                 "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
                 "audio": False
             },
-            async_processing=True
+            async_processing=True,
         )
 
         try:
@@ -231,7 +226,13 @@ def main():
         except Exception:
             pass
 
-        if context.state.playing:
+        # Safe check — context.state may not exist in all streamlit-webrtc versions
+        try:
+            is_playing = context.state.playing
+        except Exception:
+            is_playing = False
+
+        if is_playing:
             time.sleep(0.25)
             st.rerun()
 
