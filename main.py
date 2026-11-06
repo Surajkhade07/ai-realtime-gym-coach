@@ -17,6 +17,50 @@ from services.coaching.llm import LLMCoach
 from services.coaching.tts import TextToSpeech
 from services.coaching.voice_pipeline import VoicePipeline, autoplay_audio
 
+# ---------------------------------------------------------------------------
+# Free public TURN servers from Open Relay Project (openrelay.metered.ca).
+# TURN relays traffic when STUN peer-to-peer ICE negotiation fails —
+# which is the root cause of the "Connection is taking longer than expected"
+# error on restricted networks (NAT / firewalls).
+# ---------------------------------------------------------------------------
+RTC_CONFIGURATION = {
+    "iceServers": [
+        # STUN — fast, no credentials needed
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun3.l.google.com:19302"]},
+        {"urls": ["stun:stun4.l.google.com:19302"]},
+        # TURN over UDP port 80 — bypasses most NAT
+        {
+            "urls": ["turn:openrelay.metered.ca:80"],
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+        # TURN over UDP port 443 — alternative
+        {
+            "urls": ["turn:openrelay.metered.ca:443"],
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+        # TURN over TCP port 443 — works through firewalls that block UDP
+        {
+            "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+        # TURN over TLS (TURNS) — most permissive, works even on strict corporate networks
+        {
+            "urls": ["turns:openrelay.metered.ca:443"],
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+    ],
+    # Give ICE up to 15 s to gather candidates before giving up
+    "iceCandidatePoolSize": 10,
+}
+
+
 def main():
     st.set_page_config(
         page_icon="🏋️‍♀️",
@@ -32,7 +76,7 @@ def main():
     init_db()
 
     if not render_login_page():
-        return 
+        return
 
     initial_session_defaults()
 
@@ -42,7 +86,7 @@ def main():
 
             if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
                 api_key = st.secrets["GROQ_API_KEY"]
-            
+
             groq_client = Groq(api_key=api_key)
             llm_coach = LLMCoach(groq_client)
             tts = TextToSpeech()
@@ -51,7 +95,7 @@ def main():
             st.session_state.voice_pipeline = None
 
     workout_started = st.session_state.get("workout_started", False)
-    
+
     with st.sidebar:
         st.title("🏋️‍♂️ Ai Gym Coach")
 
@@ -71,7 +115,7 @@ def main():
 
             st.markdown("")
 
-            start_session_button = st.button("Start Workout", width="stretch", key="start_session_button")
+            start_session_button = st.button("Start Workout", use_container_width=True, key="start_session_button")
 
             if start_session_button:
                 st.session_state.exercise_type = plan_exercise
@@ -88,7 +132,7 @@ def main():
                         exercise=plan_exercise,
                         metrics={}
                     )
-                    
+
                     if result:
                         st.session_state.audio_to_play, st.session_state.coach_feedback = result
 
@@ -102,11 +146,11 @@ def main():
 
             st.info(f"**{exercise}** -- {sets} Sets / {reps} Reps")
 
-            end_session_button = st.button("End Workout", key="end_session_button", width="stretch")
+            end_session_button = st.button("End Workout", key="end_session_button", use_container_width=True)
 
             if end_session_button:
                 st.session_state.workout_started = False
-                
+
                 if st.session_state.voice_pipeline:
                     result = st.session_state.voice_pipeline.process_event(
                         event="workout_completed",
@@ -168,7 +212,7 @@ def main():
 
     st.title("AI Real-time GYM Coach")
     st.markdown("#### Real-time pose detection with proactive AI voice coaching")
- 
+
     if st.session_state.get("audio_to_play"):
         autoplay_audio(st.session_state.audio_to_play)
 
@@ -176,7 +220,7 @@ def main():
         st.markdown("")
         st.success(f"🤖 **Coach:** {st.session_state.coach_feedback}")
 
-# code logic for video processor class ui 
+    # code logic for video processor class ui
     if not workout_started:
         st.markdown(
             """
@@ -203,17 +247,7 @@ def main():
             key="exercise-analysis",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessorClass,
-            rtc_configuration={
-                "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {"urls": ["stun:stun2.l.google.com:19302"]},
-                    {"urls": ["stun:stun3.l.google.com:19302"]},
-                    {"urls": ["stun:stun4.l.google.com:19302"]},
-                    {"urls": ["stun:stun.stunprotocol.org:3478"]},
-                    {"urls": ["stun:stun.voip.blackberry.com:3478"]},
-                ]
-            },
+            rtc_configuration=RTC_CONFIGURATION,
             media_stream_constraints={
                 "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
                 "audio": False
@@ -240,7 +274,7 @@ def main():
 
     st.divider()
 
-# code logic for workout history
+    # code logic for workout history
     st.markdown("#### Workout History")
 
     user_id = st.session_state.get("user_id", 0)
@@ -268,11 +302,10 @@ def main():
                 "Time (sec)": "sum"
             }).reset_index()
             agg_df.index += 1
-            st.table(agg_df, border="horizontal")
+            st.table(agg_df)
         else:
             st.info("No workout history found.")
 
 
 if __name__ == "__main__":
     main()
-    

@@ -27,7 +27,7 @@ class VideoProcessorClass(VideoProcessorBase):
         model_path = str(_project_root / "ml_model" / "pose_landmarker_full.task")
         base_option = python.BaseOptions(model_asset_path=model_path)
 
-        options = vision.PoseLandmarkerOptions( 
+        options = vision.PoseLandmarkerOptions(
             base_options=base_option,
             running_mode=vision.RunningMode.VIDEO,
             min_pose_detection_confidence=0.5,
@@ -47,7 +47,7 @@ class VideoProcessorClass(VideoProcessorBase):
         }
 
         self._frame_timestamps_ms = 0
-    
+
     def set_latest_metrics(self, metrics):
         with self._lock:
             self._latest_metrics = metrics.copy()
@@ -55,7 +55,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_latest_metrics(self):
         with self._lock:
             return None if self._latest_metrics is None else self._latest_metrics.copy()
-        
+
     def set_exercise(self, exercise_type):
         with self._lock:
             self._exercise_type = exercise_type
@@ -63,7 +63,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_exercise(self):
         with self._lock:
             return self._exercise_type
-        
+
     def _draw_skeleton(self, img, landmarks):
         h, w = img.shape[:2]
 
@@ -81,18 +81,18 @@ class VideoProcessorClass(VideoProcessorBase):
                         (0, 255, 0),
                         3
                     )
-        
+
         for lm in landmarks:
             v = getattr(lm, 'visibility', 1.0)
             if v is None or v >= 0.5:
                 cv2.circle(
-                    img, 
+                    img,
                     (int(lm.x * w), int(lm.y * h)),
                     5,
                     (255, 0, 0),
                     -1
                 )
-            
+
     def _draw_no_pose_warnings(self, img):
         cv2.putText(
             img,
@@ -128,7 +128,6 @@ class VideoProcessorClass(VideoProcessorBase):
         elif ex_type == "Lunges":
             self._draw_lunge_overlays(img, metrics)
 
-
     def _draw_squats_overlays(self, img, metrics):
         h, _ = img.shape[:2]
 
@@ -141,7 +140,7 @@ class VideoProcessorClass(VideoProcessorBase):
             (0, 255, 0),
             2,
         )
-    
+
     def _draw_pushup_overlays(self, img, metrics):
         h, _ = img.shape[:2]
 
@@ -200,10 +199,9 @@ class VideoProcessorClass(VideoProcessorBase):
             dtype=np.uint8
         )
 
-        mp_image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        )
+        # MediaPipe expects RGB — convert from BGR
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         self._frame_timestamps_ms += 30
         result = self._landmarker.detect_for_video(mp_image, self._frame_timestamps_ms)
@@ -229,7 +227,7 @@ class VideoProcessorClass(VideoProcessorBase):
                     self.set_latest_metrics(metrics)
         else:
             self._draw_no_pose_warnings(image)
-            
+
             with self._lock:
                 if self._latest_metrics is not None:
                     self._latest_metrics["pose_detected"] = False
@@ -237,4 +235,4 @@ class VideoProcessorClass(VideoProcessorBase):
                     self._latest_metrics = {"pose_detected": False, "reps": 0}
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
-    
+
