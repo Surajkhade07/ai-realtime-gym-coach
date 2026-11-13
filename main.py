@@ -1,72 +1,46 @@
 import streamlit as st
 import os
-from pathlib import Path
+import base64
 import time
+import numpy as np
+import cv2
 import pandas as pd
+from pathlib import Path
+
 from services.auth.login_page import render_login_page
 from services.state.session_default import initial_session_defaults
 from services.config.workout_config import EXERCISE_OPTIONS
-from services.ui.style_loader import load_css, inject_local_font, inject_webrtc_styles
-from services.persistence.exercise_repo import init_db
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
+from services.ui.style_loader import load_css, inject_local_font
+from services.persistence.exercise_repo import init_db, get_users_exercises
 from services.vision.exercise_video_processor import VideoProcessorClass
-from services.tracking.metrics import sync_metrics_update
-from services.persistence.exercise_repo import get_users_exercises
+from services.vision.camera_component import camera_stream
+from services.tracking.metrics import sync_metrics_from_processor
 from groq import Groq
 from services.coaching.llm import LLMCoach
 from services.coaching.tts import TextToSpeech
 from services.coaching.voice_pipeline import VoicePipeline, autoplay_audio
 
-# ---------------------------------------------------------------------------
-# Free public TURN servers from Open Relay Project (openrelay.metered.ca).
-# TURN relays traffic when STUN peer-to-peer ICE negotiation fails —
-# which is the root cause of the "Connection is taking longer than expected"
-# error on restricted networks (NAT / firewalls).
-# ---------------------------------------------------------------------------
-RTC_CONFIGURATION = {
-    "iceServers": [
-        # STUN — fast, no credentials needed
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-        {"urls": ["stun:stun3.l.google.com:19302"]},
-        {"urls": ["stun:stun4.l.google.com:19302"]},
-        # TURN over UDP port 80 — bypasses most NAT
-        {
-            "urls": ["turn:openrelay.metered.ca:80"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-        # TURN over UDP port 443 — alternative
-        {
-            "urls": ["turn:openrelay.metered.ca:443"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-        # TURN over TCP port 443 — works through firewalls that block UDP
-        {
-            "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-        # TURN over TLS (TURNS) — most permissive, works even on strict corporate networks
-        {
-            "urls": ["turns:openrelay.metered.ca:443"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-    ],
-    # Give ICE up to 15 s to gather candidates before giving up
-    "iceCandidatePoolSize": 10,
-}
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_processor() -> VideoProcessorClass:
+    if "video_processor" not in st.session_state:
+        st.session_state.video_processor = VideoProcessorClass()
+    return st.session_state.video_processor
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     st.set_page_config(
         page_icon="🏋️‍♀️",
         page_title="AI Real-time GYM Coach",
         initial_sidebar_state="expanded",
-        layout="centered"
+        layout="centered",
     )
 
     _root = Path(__file__).resolve().parent
@@ -80,22 +54,22 @@ def main():
 
     initial_session_defaults()
 
+    # --- Voice pipeline ---
     if "voice_pipeline" not in st.session_state:
         try:
             api_key = os.environ.get("GROQ_API_KEY", "")
-
             if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
                 api_key = st.secrets["GROQ_API_KEY"]
-
             groq_client = Groq(api_key=api_key)
-            llm_coach = LLMCoach(groq_client)
-            tts = TextToSpeech()
-            st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
-        except Exception as e:
+            st.session_state.voice_pipeline = VoicePipeline(LLMCoach(groq_client), TextToSpeech())
+        except Exception:
             st.session_state.voice_pipeline = None
 
     workout_started = st.session_state.get("workout_started", False)
 
+    # -----------------------------------------------------------------------
+    # Sidebar
+    # -----------------------------------------------------------------------
     with st.sidebar:
         st.title("🏋️‍♂️ Ai Gym Coach")
 
@@ -103,113 +77,103 @@ def main():
             st.caption(f"👤 Login as {st.session_state.username}")
 
         st.divider()
-
         st.subheader("Workout Plan")
 
         if not workout_started:
             plan_exercise = st.selectbox("Exercise", options=EXERCISE_OPTIONS, key="plan_exercise")
-
-            plan_sets = st.number_input("Sets", min_value=0, max_value=50, key="plan_sets", step=1)
-
-            plan_reps = st.number_input("Reps per Set", min_value=0, max_value=50, key="plan_reps", step=1)
-
+            plan_sets     = st.number_input("Sets",         min_value=0, max_value=50, key="plan_sets", step=1)
+            plan_reps     = st.number_input("Reps per Set", min_value=0, max_value=50, key="plan_reps", step=1)
             st.markdown("")
 
-            start_session_button = st.button("Start Workout", use_container_width=True, key="start_session_button")
+            if st.button("Start Workout", use_container_width=True, key="start_session_button"):
+                st.session_state.exercise_type              = plan_exercise
+                st.session_state.target_sets                = int(plan_sets)
+                st.session_state.reps_per_set               = int(plan_reps)
+                st.session_state.reps                       = 0
+                st.session_state.workout_started            = True
+                st.session_state.set_cycle_started_at       = time.time()
+                st.session_state.last_saved_sets_completed  = 0
+                st.session_state.last_annotated_b64         = ""
 
-            if start_session_button:
-                st.session_state.exercise_type = plan_exercise
-                st.session_state.target_sets = int(plan_sets)
-                st.session_state.reps_per_set = int(plan_reps)
-                st.session_state.reps = 0
-                st.session_state.workout_started = True
-                st.session_state.set_cycle_started_at = time.time()
-                st.session_state.last_saved_sets_completed = 0
+                # Pre-create processor with correct exercise
+                proc = _get_processor()
+                proc.set_exercise(plan_exercise)
 
                 if st.session_state.voice_pipeline:
                     result = st.session_state.voice_pipeline.process_event(
-                        event="workout_started",
-                        exercise=plan_exercise,
-                        metrics={}
+                        event="workout_started", exercise=plan_exercise, metrics={}
                     )
-
                     if result:
                         st.session_state.audio_to_play, st.session_state.coach_feedback = result
 
-                st.session_state.last_notified_sets_completed = 0
+                st.session_state.last_notified_sets_completed  = 0
                 st.session_state.last_notified_workout_complete = False
                 st.rerun()
         else:
             exercise = st.session_state.get("exercise_type")
-            sets = st.session_state.get("target_sets")
-            reps = st.session_state.get("reps_per_set")
+            sets     = st.session_state.get("target_sets")
+            reps     = st.session_state.get("reps_per_set")
+            st.info(f"**{exercise}** — {sets} Sets / {reps} Reps")
 
-            st.info(f"**{exercise}** -- {sets} Sets / {reps} Reps")
-
-            end_session_button = st.button("End Workout", key="end_session_button", use_container_width=True)
-
-            if end_session_button:
-                st.session_state.workout_started = False
-
+            if st.button("End Workout", key="end_session_button", use_container_width=True):
+                st.session_state.workout_started    = False
+                st.session_state.last_annotated_b64 = ""
                 if st.session_state.voice_pipeline:
                     result = st.session_state.voice_pipeline.process_event(
-                        event="workout_completed",
-                        exercise=exercise,
-                        metrics={}
+                        event="workout_completed", exercise=exercise, metrics={}
                     )
                     if result:
                         st.session_state.audio_to_play, st.session_state.coach_feedback = result
-
                 st.rerun()
 
         if workout_started:
             st.divider()
-
-            exercise = st.session_state.get("exercise_type")
-            total_reps = st.session_state.get("reps", 0) or 0
+            exercise         = st.session_state.get("exercise_type")
+            total_reps       = st.session_state.get("reps", 0) or 0
             current_set_reps = st.session_state.get("current_set_reps", 0) or 0
-            reps_per_set = st.session_state.get("reps_per_set", 0) or 0
-            sets_completed = st.session_state.get("sets_completed", 0) or 0
-            target_sets = st.session_state.get("target_sets", 0) or 0
+            reps_per_set     = st.session_state.get("reps_per_set", 0) or 0
+            sets_completed   = st.session_state.get("sets_completed", 0) or 0
+            target_sets      = st.session_state.get("target_sets", 0) or 0
 
             st.subheader("Progress")
-
-            st.metric("Total Reps", f"{total_reps}")
+            st.metric("Total Reps",       f"{total_reps}")
             st.metric("Current Set Reps", f"{current_set_reps} / {reps_per_set}")
-            st.metric("Sets Completed", f"{sets_completed} / {target_sets}")
-
+            st.metric("Sets Completed",   f"{sets_completed} / {target_sets}")
             st.divider()
 
             if exercise == "Squats":
                 st.subheader("Squat Metrics")
-                st.metric("Knee Angle", f"{st.session_state.knee_angle}°")
-                st.metric("Back Angle", f"{st.session_state.back_angle}°")
+                st.metric("Knee Angle",   f"{st.session_state.knee_angle}°")
+                st.metric("Back Angle",   f"{st.session_state.back_angle}°")
                 st.metric("Depth Status", st.session_state.depth_status)
 
             elif exercise == "Push-ups":
                 st.subheader("Push-up Metrics")
-                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle",    f"{st.session_state.elbow_angle}°")
                 st.metric("Body Alignment", st.session_state.body_alignment)
-                st.metric("Hip Position", st.session_state.hip_status)
+                st.metric("Hip Position",   st.session_state.hip_status)
 
             elif exercise == "Biceps Curls (Dumbbell)":
                 st.subheader("Curl Metrics")
-                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle",        f"{st.session_state.elbow_angle}°")
                 st.metric("Shoulder Stability", st.session_state.shoulder_status)
-                st.metric("Swing Detection", st.session_state.swing_status)
+                st.metric("Swing Detection",    st.session_state.swing_status)
 
             elif exercise == "Shoulder Press":
                 st.subheader("Shoulder Press Metrics")
-                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle",  f"{st.session_state.elbow_angle}°")
                 st.metric("Arm Extension", st.session_state.extension_status)
-                st.metric("Back Arch", st.session_state.back_arch_status)
+                st.metric("Back Arch",    st.session_state.back_arch_status)
 
             elif exercise == "Lunges":
                 st.subheader("Lunge Metrics")
                 st.metric("Front Knee Angle", f"{st.session_state.front_knee_angle}°")
-                st.metric("Torso Angle", f"{st.session_state.torso_angle}°")
-                st.metric("Balance Status", st.session_state.balance_status)
+                st.metric("Torso Angle",      f"{st.session_state.torso_angle}°")
+                st.metric("Balance Status",   st.session_state.balance_status)
 
+    # -----------------------------------------------------------------------
+    # Main area
+    # -----------------------------------------------------------------------
     st.title("AI Real-time GYM Coach")
     st.markdown("#### Real-time pose detection with proactive AI voice coaching")
 
@@ -220,7 +184,9 @@ def main():
         st.markdown("")
         st.success(f"🤖 **Coach:** {st.session_state.coach_feedback}")
 
-    # code logic for video processor class ui
+    # -----------------------------------------------------------------------
+    # Camera / Workout view
+    # -----------------------------------------------------------------------
     if not workout_started:
         st.markdown(
             """
@@ -243,64 +209,76 @@ def main():
             unsafe_allow_html=True,
         )
     else:
-        context = webrtc_streamer(
-            key="exercise-analysis",
-            mode=WebRtcMode.SENDRECV,
-            video_processor_factory=VideoProcessorClass,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
-                "audio": False
-            },
-            async_processing=True,
+        # -----------------------------------------------------------------
+        # Custom browser-side camera component (no WebRTC P2P required)
+        # The JS inside the component accesses the webcam directly in the
+        # browser and sends JPEG frames to Python over Streamlit's existing
+        # WebSocket connection. Python runs MediaPipe, returns annotated frame.
+        # -----------------------------------------------------------------
+        processor = _get_processor()
+        processor.set_exercise(st.session_state.get("exercise_type", "Squats"))
+
+        # Pass the last annotated frame back to the component for display
+        last_annotated_b64 = st.session_state.get("last_annotated_b64", "")
+
+        # Component returns the latest raw webcam frame as a base64 data-URL
+        raw_frame_b64 = camera_stream(
+            annotated_b64=last_annotated_b64,
+            key="pose_camera",
         )
 
-        try:
-            sync_metrics_update(context)
-        except Exception:
-            pass
+        # Process the received frame with MediaPipe
+        if raw_frame_b64 and isinstance(raw_frame_b64, str) and raw_frame_b64.startswith("data:image"):
+            try:
+                # Decode base64 → numpy BGR array
+                header, encoded = raw_frame_b64.split(",", 1)
+                img_bytes = base64.b64decode(encoded)
+                nparr     = np.frombuffer(img_bytes, np.uint8)
+                frame     = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # Safe check — context.state may not exist in all streamlit-webrtc versions
-        try:
-            is_playing = context.state.playing
-        except Exception:
-            is_playing = False
+                if frame is not None:
+                    # Run MediaPipe pose detection + draw skeleton
+                    annotated_bgr = processor.process_frame(frame)
 
-        if is_playing:
-            time.sleep(0.25)
-            st.rerun()
+                    # Encode annotated frame back to base64 JPEG
+                    _, buf = cv2.imencode(".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    annotated_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
+                    st.session_state.last_annotated_b64 = annotated_b64
 
-        inject_webrtc_styles()
+                    # Update session state metrics
+                    sync_metrics_from_processor(processor)
+
+            except Exception:
+                pass  # Keep displaying last good frame
 
     st.divider()
 
-    # code logic for workout history
+    # -----------------------------------------------------------------------
+    # Workout history
+    # -----------------------------------------------------------------------
     st.markdown("#### Workout History")
 
     user_id = st.session_state.get("user_id", 0)
-
     if isinstance(user_id, int):
         history_rows = get_users_exercises(user_id)
         arr = [
             {
-                "Exercise": row['exercise_name'],
-                "Reps": row['reps'],
-                "Sets": row['sets'],
-                "Time (sec)": row['time'],
-                "Date": row['created_at']
+                "Exercise":  row["exercise_name"],
+                "Reps":      row["reps"],
+                "Sets":      row["sets"],
+                "Time (sec)": row["time"],
+                "Date":      row["created_at"],
             }
             for row in history_rows
         ]
-
         df = pd.DataFrame(arr)
-
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"]).dt.date
-            agg_df = df.groupby(["Exercise", "Date"]).agg({
-                "Reps": 'sum',
-                "Sets": "sum",
-                "Time (sec)": "sum"
-            }).reset_index()
+            agg_df = (
+                df.groupby(["Exercise", "Date"])
+                .agg({"Reps": "sum", "Sets": "sum", "Time (sec)": "sum"})
+                .reset_index()
+            )
             agg_df.index += 1
             st.table(agg_df)
         else:
