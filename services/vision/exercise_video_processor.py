@@ -50,9 +50,7 @@ class VideoProcessorClass:
 
         self._frame_ts_ms = 0
 
-    # ------------------------------------------------------------------ #
-    # Thread-safe accessors                                                #
-    # ------------------------------------------------------------------ #
+    
 
     def set_latest_metrics(self, metrics):
         with self._lock:
