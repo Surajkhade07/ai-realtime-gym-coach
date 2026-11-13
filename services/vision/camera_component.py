@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 import streamlit.components.v1 as components
 
 # Resolve the path to the HTML component folder
@@ -10,7 +11,7 @@ _camera_func = components.declare_component(
 )
 
 
-def camera_stream(annotated_b64: str = "", key: str = "camera_stream") -> str | None:
+def camera_stream(annotated_b64: str = "", key: str = "camera_stream") -> Optional[str]:
     """
     Custom Streamlit component that:
       1. Accesses the user's webcam directly in the browser (no WebRTC P2P needed).
