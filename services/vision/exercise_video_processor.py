@@ -11,10 +11,7 @@ from mediapipe.tasks.python import vision
 from detectors.squat import SquatDetector
 from detectors.pushup import PushUpDetector
 from detectors.biceps_curl import BicepsCurlDetector
-try:
-    from detectors.shoulders_press import ShoulderPressDetector
-except ImportError:
-    from detectors.shoulder_press import ShoulderPressDetector
+from detectors.shoulder_press import ShoulderPressDetector
 from detectors.lunges import LungesDetector
 from services.config.workout_config import POSE_CONNECTIONS
 
@@ -25,10 +22,15 @@ class VideoProcessorClass(VideoProcessorBase):
         self._latest_metrics = None
         self._exercise_type = "Squats"
 
-        _project_root = Path(__file__).resolve().parents[2]
-        model_path = os.path.join(_project_root, "ml_model", "pose_landmarker_full.task")
+        # Check ml_models, ml_model, and relative to file root
+        model_path = os.path.join(os.getcwd(), "ml_models", "pose_landmarker_full.task")
         if not os.path.exists(model_path):
-            model_path = os.path.join(_project_root, "ml_models", "pose_landmarker_full.task")
+            model_path = os.path.join(os.getcwd(), "ml_model", "pose_landmarker_full.task")
+        if not os.path.exists(model_path):
+            _root = Path(__file__).resolve().parents[2]
+            model_path = str(_root / "ml_models" / "pose_landmarker_full.task")
+            if not os.path.exists(model_path):
+                model_path = str(_root / "ml_model" / "pose_landmarker_full.task")
 
         base_option = python.BaseOptions(model_asset_path=model_path)
 
@@ -52,7 +54,7 @@ class VideoProcessorClass(VideoProcessorBase):
         }
 
         self._frame_timestamps_ms = 0
-
+    
     def set_latest_metrics(self, metrics):
         with self._lock:
             self._latest_metrics = metrics.copy()
@@ -60,7 +62,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_latest_metrics(self):
         with self._lock:
             return None if self._latest_metrics is None else self._latest_metrics.copy()
-
+        
     def set_exercise(self, exercise_type):
         with self._lock:
             self._exercise_type = exercise_type
@@ -68,7 +70,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_exercise(self):
         with self._lock:
             return self._exercise_type
-
+        
     def _draw_skeleton(self, img, landmarks):
         h, w = img.shape[:2]
 
@@ -78,34 +80,37 @@ class VideoProcessorClass(VideoProcessorBase):
 
             v1 = getattr(p1, 'visibility', 1.0)
             v2 = getattr(p2, 'visibility', 1.0)
+            if v1 is None: v1 = 1.0
+            if v2 is None: v2 = 1.0
 
-            if (v1 is not None and v1 > 0.5) and (v2 is not None and v2 > 0.5):
+            if v1 > 0.5 and v2 > 0.5:
                 cv2.line(
                     img,
                     (int(p1.x * w), int(p1.y * h)),
                     (int(p2.x * w), int(p2.y * h)),
                     (0, 255, 0),
-                    4
+                    8
                 )
-
+        
         for lm in landmarks:
             v = getattr(lm, 'visibility', 1.0)
-            if v is not None and v > 0.5:
+            if v is None: v = 1.0
+            if v > 0.5:
                 cv2.circle(
-                    img,
+                    img, 
                     (int(lm.x * w), int(lm.y * h)),
-                    5,
+                    8,
                     (255, 0, 0),
                     -1
                 )
-
+            
     def _draw_no_pose_warnings(self, img):
         cv2.putText(
             img,
             "NO POSE DETECTED",
             (30, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
+            1,
             (0, 255, 0),
             2,
             cv2.LINE_AA,
@@ -114,9 +119,9 @@ class VideoProcessorClass(VideoProcessorBase):
         cv2.putText(
             img,
             "PLEASE FACE THE CAMERA",
-            (30, 90),
+            (30, 100),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            1,
             (0, 255, 0),
             2,
             cv2.LINE_AA,
@@ -146,7 +151,7 @@ class VideoProcessorClass(VideoProcessorBase):
             (0, 255, 0),
             2,
         )
-
+    
     def _draw_pushup_overlays(self, img, metrics):
         h, _ = img.shape[:2]
 
@@ -232,7 +237,7 @@ class VideoProcessorClass(VideoProcessorBase):
                 self.set_latest_metrics(metrics)
         else:
             self._draw_no_pose_warnings(image)
-
+            
             with self._lock:
                 if self._latest_metrics is not None:
                     self._latest_metrics["pose_detected"] = False
