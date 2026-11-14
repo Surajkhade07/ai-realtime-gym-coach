@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 import cv2
 import av
 import numpy as np
@@ -22,16 +21,11 @@ class VideoProcessorClass(VideoProcessorBase):
         self._latest_metrics = None
         self._exercise_type = "Squats"
 
-        # Check ml_models, ml_model, and relative to file root
         model_path = os.path.join(os.getcwd(), "ml_models", "pose_landmarker_full.task")
         if not os.path.exists(model_path):
-            model_path = os.path.join(os.getcwd(), "ml_model", "pose_landmarker_full.task")
-        if not os.path.exists(model_path):
+            from pathlib import Path
             _root = Path(__file__).resolve().parents[2]
             model_path = str(_root / "ml_models" / "pose_landmarker_full.task")
-            if not os.path.exists(model_path):
-                model_path = str(_root / "ml_model" / "pose_landmarker_full.task")
-
         base_option = python.BaseOptions(model_asset_path=model_path)
 
         options = vision.PoseLandmarkerOptions(
@@ -78,12 +72,7 @@ class VideoProcessorClass(VideoProcessorBase):
             p1 = landmarks[start_idx]
             p2 = landmarks[end_idx]
 
-            v1 = getattr(p1, 'visibility', 1.0)
-            v2 = getattr(p2, 'visibility', 1.0)
-            if v1 is None: v1 = 1.0
-            if v2 is None: v2 = 1.0
-
-            if v1 > 0.5 and v2 > 0.5:
+            if p1.visibility > 0.7 and p2.visibility > 0.7:
                 cv2.line(
                     img,
                     (int(p1.x * w), int(p1.y * h)),
@@ -93,9 +82,7 @@ class VideoProcessorClass(VideoProcessorBase):
                 )
         
         for lm in landmarks:
-            v = getattr(lm, 'visibility', 1.0)
-            if v is None: v = 1.0
-            if v > 0.5:
+            if lm.visibility > 0.7:
                 cv2.circle(
                     img, 
                     (int(lm.x * w), int(lm.y * h)),
@@ -138,6 +125,7 @@ class VideoProcessorClass(VideoProcessorBase):
             self._draw_press_overlays(img, metrics)
         elif ex_type == "Lunges":
             self._draw_lunge_overlays(img, metrics)
+
 
     def _draw_squats_overlays(self, img, metrics):
         h, _ = img.shape[:2]
@@ -212,7 +200,7 @@ class VideoProcessorClass(VideoProcessorBase):
 
         mp_image = mp.Image(
             image_format=mp.ImageFormat.SRGB,
-            data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            data=cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         )
 
         self._frame_timestamps_ms += 30
@@ -245,3 +233,4 @@ class VideoProcessorClass(VideoProcessorBase):
                     self._latest_metrics = {"pose_detected": False}
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
+    
