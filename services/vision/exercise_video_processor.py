@@ -26,6 +26,8 @@ class VideoProcessorClass(VideoProcessorBase):
             from pathlib import Path
             _root = Path(__file__).resolve().parents[2]
             model_path = str(_root / "ml_models" / "pose_landmarker_full.task")
+            if not os.path.exists(model_path):
+                model_path = str(_root / "ml_model" / "pose_landmarker_full.task")
         base_option = python.BaseOptions(model_asset_path=model_path)
 
         options = vision.PoseLandmarkerOptions(
