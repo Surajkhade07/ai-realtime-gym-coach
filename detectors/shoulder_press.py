@@ -4,7 +4,7 @@ from core.base_exercise import BaseExercise
 class ShoulderPressDetector(BaseExercise):
     UP_THRESHOLD = 160
     DOWN_THRESHOLD = 90
-    MIN_VISIBILITY = 0.7
+    MIN_VISIBILITY = 0.5
 
     LEFT_SHOULDER = 11
     LEFT_ELBOW = 13
@@ -25,8 +25,10 @@ class ShoulderPressDetector(BaseExercise):
         self.stage = None
 
     def process(self, landmarks) -> dict:
-        left_vis = landmarks[self.LEFT_ELBOW].visibility
-        right_vis = landmarks[self.RIGHT_ELBOW].visibility
+        left_vis = getattr(landmarks[self.LEFT_ELBOW], 'visibility', 1.0)
+        right_vis = getattr(landmarks[self.RIGHT_ELBOW], 'visibility', 1.0)
+        if left_vis is None: left_vis = 1.0
+        if right_vis is None: right_vis = 1.0
 
         if left_vis >= right_vis:
             shoulder_idx = self.LEFT_SHOULDER
@@ -47,7 +49,11 @@ class ShoulderPressDetector(BaseExercise):
             self.get_point(landmarks, wrist_idx),
         )
 
-        key_landmarks_visible = landmarks[shoulder_idx].visibility > self.MIN_VISIBILITY and landmarks[elbow_idx].visibility > self.MIN_VISIBILITY and landmarks[wrist_idx].visibility > self.MIN_VISIBILITY
+        s_vis = getattr(landmarks[shoulder_idx], 'visibility', 1.0) or 1.0
+        e_vis = getattr(landmarks[elbow_idx], 'visibility', 1.0) or 1.0
+        w_vis = getattr(landmarks[wrist_idx], 'visibility', 1.0) or 1.0
+
+        key_landmarks_visible = s_vis > self.MIN_VISIBILITY and e_vis > self.MIN_VISIBILITY and w_vis > self.MIN_VISIBILITY
 
         if key_landmarks_visible:
             if elbow_angle > self.UP_THRESHOLD:
@@ -58,26 +64,19 @@ class ShoulderPressDetector(BaseExercise):
                 self.reps += 1
 
         if elbow_angle >= self.UP_THRESHOLD:
-            extension_status = "FULL EXTENSION"
-        elif elbow_angle >= 130:
-            extension_status = "NEARLY EXTENDED"
-        elif elbow_angle >= self.DOWN_THRESHOLD:
-            extension_status = "PRESSING"
+            extension_status = "LOCKED OUT"
+        elif elbow_angle >= 140:
+            extension_status = "PARTIAL EXTENSION"
         else:
-            extension_status = "START POSITION"
+            extension_status = "BOTTOM"
 
-        back_angle = self.calculate_angle(
+        trunk_angle = self.calculate_angle(
             self.get_point(landmarks, shoulder_idx),
             self.get_point(landmarks, hip_idx),
             self.get_point(landmarks, knee_idx),
         )
 
-        if back_angle >= 160:
-            back_arch_status = "Neutral"
-        elif back_angle >= 140:
-            back_arch_status = "Slight Arch"
-        else:
-            back_arch_status = "Excessive Arch"
+        back_arch_status = "EXCESSIVE ARCH" if trunk_angle < 165 else "NEUTRAL"
 
         return {
             "reps": self.reps,
@@ -85,4 +84,3 @@ class ShoulderPressDetector(BaseExercise):
             "extension_status": extension_status,
             "back_arch_status": back_arch_status,
         }
-    

@@ -74,7 +74,12 @@ class VideoProcessorClass(VideoProcessorBase):
             p1 = landmarks[start_idx]
             p2 = landmarks[end_idx]
 
-            if p1.visibility > 0.7 and p2.visibility > 0.7:
+            v1 = getattr(p1, 'visibility', 1.0)
+            v2 = getattr(p2, 'visibility', 1.0)
+            if v1 is None: v1 = 1.0
+            if v2 is None: v2 = 1.0
+
+            if v1 > 0.5 and v2 > 0.5:
                 cv2.line(
                     img,
                     (int(p1.x * w), int(p1.y * h)),
@@ -84,7 +89,9 @@ class VideoProcessorClass(VideoProcessorBase):
                 )
         
         for lm in landmarks:
-            if lm.visibility > 0.7:
+            v = getattr(lm, 'visibility', 1.0)
+            if v is None: v = 1.0
+            if v > 0.5:
                 cv2.circle(
                     img, 
                     (int(lm.x * w), int(lm.y * h)),
@@ -218,13 +225,15 @@ class VideoProcessorClass(VideoProcessorBase):
             detector = self._detectors.get(ex_type)
 
             if detector:
-                metrics = detector.process(landmarks)
+                try:
+                    metrics = detector.process(landmarks)
+                except Exception:
+                    metrics = None
 
-                metrics["pose_detected"] = True
-
-                self._draw_overlays(image, metrics, ex_type)
-
-                self.set_latest_metrics(metrics)
+                if metrics is not None:
+                    metrics["pose_detected"] = True
+                    self._draw_overlays(image, metrics, ex_type)
+                    self.set_latest_metrics(metrics)
         else:
             self._draw_no_pose_warnings(image)
             

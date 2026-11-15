@@ -4,7 +4,7 @@ from core.base_exercise import BaseExercise
 class LungesDetector(BaseExercise):
     DOWN_THRESHOLD = 100
     UP_THRESHOLD = 160
-    MIN_VISIBILITY = 0.7
+    MIN_VISIBILITY = 0.5
     BALANCE_TOLERANCE = 0.10
 
     LEFT_HIP = 23
@@ -49,7 +49,11 @@ class LungesDetector(BaseExercise):
             front_ankle_idx = self.RIGHT_ANKLE
             shoulder_idx_for_torso = self.RIGHT_SHOULDER
 
-        key_landmarks_visible = landmarks[front_hip_idx].visibility > self.MIN_VISIBILITY and landmarks[front_knee_idx].visibility > self.MIN_VISIBILITY and landmarks[front_ankle_idx].visibility > self.MIN_VISIBILITY
+        h_vis = getattr(landmarks[front_hip_idx], 'visibility', 1.0) or 1.0
+        k_vis = getattr(landmarks[front_knee_idx], 'visibility', 1.0) or 1.0
+        a_vis = getattr(landmarks[front_ankle_idx], 'visibility', 1.0) or 1.0
+
+        key_landmarks_visible = h_vis > self.MIN_VISIBILITY and k_vis > self.MIN_VISIBILITY and a_vis > self.MIN_VISIBILITY
 
         if key_landmarks_visible:
             if front_knee_angle < self.DOWN_THRESHOLD:
@@ -65,14 +69,11 @@ class LungesDetector(BaseExercise):
             self.get_point(landmarks, front_knee_idx),
         )
 
-        shoulder_mid_x = (landmarks[self.LEFT_SHOULDER].x + landmarks[self.RIGHT_SHOULDER].x) / 2
-        hip_mid_x = (landmarks[self.LEFT_HIP].x + landmarks[self.RIGHT_HIP].x) / 2
-        lateral_offset = abs(shoulder_mid_x - hip_mid_x)
+        left_ankle_x = landmarks[self.LEFT_ANKLE].x
+        right_ankle_x = landmarks[self.RIGHT_ANKLE].x
+        base_width = abs(left_ankle_x - right_ankle_x)
 
-        if lateral_offset <= self.BALANCE_TOLERANCE:
-            balance_status = "BALANCED"
-        else:
-            balance_status = "OFF BALANCE"
+        balance_status = "BALANCED" if base_width >= self.BALANCE_TOLERANCE else "NARROW STANCE"
 
         return {
             "reps": self.reps,
@@ -80,4 +81,3 @@ class LungesDetector(BaseExercise):
             "torso_angle": int(torso_angle),
             "balance_status": balance_status,
         }
-    

@@ -201,7 +201,22 @@ def main():
             key="exercise-analysis",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessorClass,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            rtc_configuration={
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {
+                        "urls": [
+                            "turn:openrelay.metered.ca:80",
+                            "turn:openrelay.metered.ca:443",
+                            "turn:openrelay.metered.ca:443?transport=tcp",
+                        ],
+                        "username": "openrelayproject",
+                        "credential": "openrelayproject",
+                    },
+                ]
+            },
             media_stream_constraints={
                 "video": True,
                 "audio": False
@@ -209,10 +224,18 @@ def main():
             async_processing=True
         )
 
-        sync_metrics_update(context)
+        try:
+            sync_metrics_update(context)
+        except Exception:
+            pass
 
-        if context.state.playing:
-            time.sleep(0.25)
+        try:
+            is_playing = bool(context and hasattr(context, "state") and context.state.playing)
+        except Exception:
+            is_playing = False
+
+        if is_playing:
+            time.sleep(1.0)
             st.rerun()
 
         inject_webrtc_styles()

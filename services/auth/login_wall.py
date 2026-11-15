@@ -1,4 +1,5 @@
 import streamlit as st
+
 from services.persistence.exercise_repository import register_user, verify_user
 
 

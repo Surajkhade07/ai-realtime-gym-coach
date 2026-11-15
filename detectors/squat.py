@@ -4,7 +4,7 @@ from core.base_exercise import BaseExercise
 class SquatDetector(BaseExercise):
     DOWN_THRESHOLD = 100   
     UP_THRESHOLD = 160     
-    MIN_VISIBILITY = 0.7
+    MIN_VISIBILITY = 0.5
 
     LEFT_HIP = 23
     LEFT_KNEE = 25
@@ -35,8 +35,10 @@ class SquatDetector(BaseExercise):
             self.get_point(landmarks, self.RIGHT_ANKLE)
         )
 
-        left_vis = landmarks[self.LEFT_KNEE].visibility
-        right_vis = landmarks[self.RIGHT_KNEE].visibility
+        left_vis = getattr(landmarks[self.LEFT_KNEE], 'visibility', 1.0)
+        right_vis = getattr(landmarks[self.RIGHT_KNEE], 'visibility', 1.0)
+        if left_vis is None: left_vis = 1.0
+        if right_vis is None: right_vis = 1.0
 
         if left_vis >= right_vis:
             knee_angle = left_knee_angle
@@ -51,7 +53,14 @@ class SquatDetector(BaseExercise):
             self.get_point(landmarks, knee_idx)
         )
 
-        key_landmark_visible = landmarks[hip_idx].visibility >= self.MIN_VISIBILITY and landmarks[knee_idx].visibility >= self.MIN_VISIBILITY and landmarks[ankle_idx].visibility >= self.MIN_VISIBILITY
+        h_vis = getattr(landmarks[hip_idx], 'visibility', 1.0)
+        k_vis = getattr(landmarks[knee_idx], 'visibility', 1.0)
+        a_vis = getattr(landmarks[ankle_idx], 'visibility', 1.0)
+        if h_vis is None: h_vis = 1.0
+        if k_vis is None: k_vis = 1.0
+        if a_vis is None: a_vis = 1.0
+
+        key_landmark_visible = h_vis >= self.MIN_VISIBILITY and k_vis >= self.MIN_VISIBILITY and a_vis >= self.MIN_VISIBILITY
 
         if key_landmark_visible:
             if knee_angle < self.DOWN_THRESHOLD:
@@ -74,4 +83,3 @@ class SquatDetector(BaseExercise):
             "back_angle": int(back_angle),
             "depth_status": depth_status
         }
-    
